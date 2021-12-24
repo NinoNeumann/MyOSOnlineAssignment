@@ -3218,230 +3218,101 @@ int FcComd(int k)
 // Replace 命令
 
 int ReplaceComd(int k) {
+	// 命令参数不够 报错
+	if (k == 1) {
+		cout << "\n文件不能取代自己！";
+		return -1;
+	}
+	if (k != 2) {
+		cout << "\nplease enter the enough parameters!";
+		return -1;
+	}
+	FCB* ofcbp;
+	char* FileName;
+	char FilePath_of_sec_para[PATH_LEN];
+	int s0;
+	// 接下来要做的是将第一参数中的文件名称提取出来 接着将下一命令参数中的 绝对路径和这个文件名做一个拼接
+	int s1 = ProcessPath(comd[1], FileName, 1, 1, '\020');  // 最后的属性规定了这个参数取出的是FileName所在的目录。 返回的是FileName所在目录的首块号；
+	s0 = s1;
+	s1 = FindFCB(FileName, s1, '\0', ofcbp);
+	if (s1 < 1) {
+		// 说明 第一个参数文件（指定文件）不存在
+		cout << "\n指定文件不存在！！";
+		return -1;
+	}
+	//找文件：
+	// 考虑以下的情况：
+	/*
+	* 1、参数二的父目录缺省（k==1）
+	* 2、参数二十父目录 ..   可以参考CD 命令中的..
+	* 3、参数为不同的目录
+	*/
+	FCB* fcbp;
+	int s2 = FindPath(comd[2], '\020', 1, fcbp);	//此时的temppath里面存放的就是当前的 路径名
+	if (s2 < 1) {
+		// 目录路径错误
+		cout << "\n目录路径错误";
+		return -1;
+	}
+	// 查看文档里面的关于 temppath的解释吧
+	strcpy(FilePath_of_sec_para, temppath);
+	int len = strlen(temppath);
+	if (temppath[len - 1] != '/')
+		strcat(FilePath_of_sec_para, "/");
+	strcat(FilePath_of_sec_para, FileName);
 
-	short i, s1, s2; //s2目标文件目录项地址
-	short size, bnum;
-	short b, b0, size1, bnum1;
-	char attrib = '\0', * FileName1, * FileName2;
-	char gFileName1[PATH_LEN], gFileName2[PATH_LEN];	//存放文件全路径名
-	FCB* fcbp1;
-	FCB* fcbp2;
-	if (k < 1) {
-		cout << "文件不存在。" << endl;
+	s2 = FindPath(FilePath_of_sec_para, '\0', 1, fcbp);
+	if (s2 < 1) {
+		// 未查找到指定目录中的指定文件
+		cout << "\n目录"<<comd[2]<<"中没有可取代的同名文件。\n";
 		return -2;
 	}
-	if (k == 1) { //目录名参数缺省  取代当前目录的同名文件 
-		s1 = ProcessPath(comd[1], FileName1, k, 1, '\20');
-		if (s1 < 1)			//路径错误
-			return s1;		//失败，返回
-		s1 = FindFCB(FileName1, s1, attrib, fcbp1);		//取FileName的首块号(查其存在性)
-		strcpy(gFileName1, temppath);
-
-		//下面构造的是文件1的全路径名  usr/user/oo
-		i = strlen(temppath);
-		if (temppath[i - 1] != '/')
-			strcat(gFileName1, "/");
-		strcat(gFileName1, FileName1);//构造文件1的全路径名
-		if (s1 < 0)
-		{
-			cout << "\n文件" << FileName1 << "不存在。\n";
-			return -2;
-		}
+	// fcbp  指定目录中指定fcbp<被取代的文件的fcb>  和参数1指定的目标的fcb oFCB
 
 
-		//寻找当前目录curpath中与FileName1同名的文件
-		s2 = FindFCB(FileName1, curpath.fblock, attrib, fcbp2);
-		strcpy(gFileName2, curpath.cpath);
-		i = strlen(curpath.cpath);
-		if (curpath.cpath[i - 1] != '/')
-			strcat(gFileName2, "/");
-		strcat(gFileName2, FileName1);	//构造目标文件的全路径名
-
-		if (s2 < 0) {
-			cout << "目录中没有可取代的同名文件。" << endl;
-			return -2;
-		}
-		else {
-			//不能自己取代自己
-			if (strcmp(gFileName2, gFileName1) == 0) {
-				cout << "文件不能自己取代自己。" << endl;
-				return -2;
-			}
-			//判断该文件是否处在一个正在打开的状态
-			// 文件被打开就不能取代该文件
-			i = Check_UOF(gFileName2);		//查UOF
-
-			if (i < S)
-			{
-				cout << "\n文件" << gFileName2 << "正在使用，不能被取代。";
-				return -2;
-			}
-
-
-			//具有隐藏和系统属性的文件不能被取代 
-			int Fattributes = fcbp2->Fattrib;
-			if ((Fattributes >> 1) & 1 || (Fattributes >> 2) & 1) {
-				cout << "\n具有隐藏和系统属性的文件不能被取代";
-				return -2;
-			}
-			//若被取代的文件是只读属性的文件时，应询问用户
-			char yn;
-			if (Fattributes & 1) {
-				cout << "\n文件" << gFileName2
-					<< "为只读属性文件，是否继续？(y/n)" << endl;
-				cin >> yn;
-				if (yn == 'N' || yn == 'n') {
-					return -2;				//不取代返回
-				}
-			}
-
-			//下面开始进行文件的取代即文件的copy
-			size = fcbp1->Fsize;		//源文件的长度
-			bnum = size / SIZE + (short)(size % SIZE > 0);	//计算源文件所占盘块数
-			size1 = fcbp2->Fsize;			//文件长度
-			bnum1 = size1 / SIZE + (short)(size1 % SIZE > 0);
-
-
-			if (bnum > bnum1 && FAT[0] < (bnum - bnum1))
-			{
-				cout << "\n磁盘空间已满，不能复制文件。";
-				return -6;
-			}
-			*fcbp2 = *fcbp1;						//源文件的目录项复制给目标文件
-
-
-			// 当目的文件 的长度小于原文件的 长度 则自动获得空闲盘快来
-			// 写入多的数据
-			// 使用覆盖的方式替换文件
-			b0 = fcbp2->Addr;  // 记录目标文件的首块号
-			b = b0;
-			while (s1 > 0)
-			{
-
-				memcpy(Disk[b], Disk[s1], SIZE);	//复制盘块
-				s1 = FAT[s1];				//准备复制下一个盘块
-				b = FAT[b0];
-				if (b == 0) {
-					b = getblock();
-					FAT[b0] = b;
-				}
-				b0 = b;
-			}
-			// 复制完成
-			return 0;
-		}
+	// 删除被取代的文件  如果该文件只能读 那么久询问用户：   参考del命令：
+	// 先使用s1 废物参数占用一下吧
+	s1 = Check_UOF(FilePath_of_sec_para);
+	if (s1 < S) {
+		cout << "\n文件" << FilePath_of_sec_para << "正在使用，不能删除!\n";
+		return -3;
 	}
-	else if (k == 2) { //replace <文件名> <目录名>
-		s1 = ProcessPath(comd[1], FileName1, k, 2, '\20');//取FileName所在目录的首块号
-		if (s1 < 1)			//路径错误
-			return s1;		//失败，返回
-		/*
-		s2 = ProcessPath(comd[2], FileName2, k, 2, '\20');
-		if (s2 < 1)			//路径错误
-			return s2;		//失败，返回
-		*/
-		s1 = FindFCB(FileName1, s1, attrib, fcbp1);		//取FileName的首块号(查其存在性)
-		strcpy(gFileName1, temppath);
-		i = strlen(temppath);
-		if (temppath[i - 1] != '/')
-			strcat(gFileName1, "/");
-		strcat(gFileName1, FileName1);//构造文件1的全路径名
-		if (s1 < 0)
-		{
-			cout << "\n文件" << FileName1 << "不存在。\n";
-			return -2;
-		}
-		attrib = '\040';
-		s2 = FindPath(comd[2], attrib, 1, fcbp2);	//查找目标路径的首块号
-		if (s2 < 0) {//不存在当前目标路径则返回
-			cout << "目标路径错误。" << endl;
-			return -2;
-		}
-		s2 = FindFCB(FileName1, s2, attrib, fcbp2);		//寻找<目录名>中与FileName1同名的文件
-		strcpy(gFileName2, temppath);
-		/*
-		i = strlen(temppath);
-		if (temppath[i - 1] != '/')
-			strcat(gFileName2, "/");
-		strcat(gFileName2, FileName1);	//构造目标文件的全路径名
-		*/
-		if (s2 < 0)
-		{
-			cout << "目录" << gFileName2 << "中没有可取代的同名文件。";		//这里的temppath仅仅是一个目录
-			return -2;
-		}
-		else {
-
-			i = strlen(temppath);
-			if (temppath[i - 1] != '/')
-				strcat(gFileName2, "/");
-			strcat(gFileName2, FileName1);	//构造目标文件的全路径名
-
-			//不能自己取代自己
-			if (strcmp(gFileName2, gFileName1) == 0) {
-				cout << "文件不能自己取代自己。" << endl;
-				return -2;
-			}
-			//判断该文件是否处在一个正在打开的状态
-			i = Check_UOF(gFileName2);		//查UOF
-			if (i < S)					//该文件已在UOF中
-			{
-				cout << "\n文件" << gFileName2 << "正在使用，不能被取代。\n";
-				return -2;
-			}
-
-
-			//具有隐藏和系统属性的文件不能被取代 
-			int Fattributes = fcbp2->Fattrib;
-			if ((Fattributes >> 1) & 1 || (Fattributes >> 2) & 1) {
-				cout << "\n隐含、系统属性的文件。";
-				return -2;
-			}
-			//应询问用户
-			char yn;
-			if (Fattributes & 1) {
-				cout << "\n文件" << gFileName2 << "是只读属性文件，是否仍要取代它？(y/n)";
-				cin >> yn;
-				if (yn == 'N' || yn == 'n') {
-					return -2;				//不取代返回
-				}
-			}
-
-			// 计算取代之后的盘空间  使用
-			size = fcbp1->Fsize;		//源文件的长度
-			bnum = size / SIZE + (short)(size % SIZE > 0);	//计算源文件所占盘块数
-			size1 = fcbp2->Fsize;			//文件长度
-			bnum1 = size1 / SIZE + (short)(size1 % SIZE > 0); // 计算目标文件占用盘快数
-			if (bnum > bnum1 && FAT[0] < (bnum - bnum1))
-			{
-				cout << "\n磁盘空间已满，不能复制文件。\n";
-				return -6;
-			}
-			*fcbp2 = *fcbp1;						//源文件的目录项复制给目标文件
-			// 使用覆盖的方式替换文件
-			b0 = fcbp2->Addr;  // 记录目标文件的首块号
-			b = b0;
-			while (s1 > 0)
-			{
-				memcpy(Disk[b], Disk[s1], SIZE);	//复制盘块
-				s1 = FAT[s1];				//准备复制下一个盘块
-				b = FAT[b0];
-				if (b == 0) {
-					b = getblock();
-					FAT[b0] = b;
-				}
-				b0 = b;
-			}
-			//文件复制成功，返回
-			return 0;
-		}
+	if (fcbp->Fattrib & '\01') {
+		char yn;
+		cout << "\n文件" << FilePath_of_sec_para << "是只读文件，你确定要删除它吗？(y/n) ";
+		cin >> yn;
+		if (yn != 'Y' && yn != 'y')
+			return 0;		//不删除，返回
 	}
-	else {
-		cout << "命令中参数太多。" << endl;
-		return -2;
+	int fat_in_need = fcbp->Fsize / SIZE + (short)(fcbp->Fsize % SIZE > 0);
+	// 拷贝的时候需要计算系统空间是否充足
+	int size = ofcbp->Fsize;
+	int fat_in_need_o = size / SIZE + (short)(size % SIZE > 0);
+	if (fat_in_need_o > fat_in_need && (fat_in_need_o - fat_in_need) > FAT[0]) {
+		cout << "\n replace 之后的系统存储空间不足！！";
+		return -1;
 	}
+	int so = ofcbp->Addr;
+
+
+	while (s2 > 0 && so > 0)						//回收磁盘空间
+	{
+		s1 = so;
+		s0 = s2;
+		memcpy(Disk[s0],Disk[s1],SIZE);
+		so = FAT[so];
+		s2 = FAT[s2];
+
+	}
+	// 将这个在当前目录中重新创建
+	// 如果s1 >0  说明没复制完  找空闲盘快继续复制
+	if (so > 0) {
+
+	}
+
+
+
 	return 0;
 }
-
 
 
